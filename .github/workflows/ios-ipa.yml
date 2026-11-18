@@ -55,6 +55,8 @@ jobs:
           curl -fsSLo axe.tar.gz https://github.com/cameroncooke/AXe/releases/download/v2.0.4/AXe-macOS-homebrew-v2.0.4.tar.gz
           echo '4997a7305814d1bcbb925bf1f81667177e204fe58855d99c4896b85d749e181a  axe.tar.gz' | shasum -a 256 -c -
           mkdir axe && tar -xzf axe.tar.gz -C axe
+          codesign --force --sign - --timestamp=none axe/Frameworks/FBControlCore.framework axe/Frameworks/FBSimulatorControl.framework axe/axe
+          axe/axe --version
           echo "$RUNNER_TEMP/axe" >> "$GITHUB_PATH"
       - name: Exercise the Duo reader
         env:

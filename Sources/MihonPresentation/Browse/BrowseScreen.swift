@@ -15,6 +15,7 @@ public struct BrowseScreen: View {
     @State private var searchQuery = ""
     @State private var isSearching = false
     @State private var showLanguageSheet = false
+    @State private var showWebSources = false
     @State private var showRepoSheet = false
 
     public init() {
@@ -31,6 +32,9 @@ public struct BrowseScreen: View {
                 MihonSearchAppBar(query: $searchQuery, placeholder: tab == 1 ? "搜索插件…" : "搜索图源…", onClose: { isSearching = false })
             } else {
                 MihonTopAppBar(title: "浏览") {
+                    if tab == 0 {
+                        MihonIconButton("plus", label: "管理图源") { showWebSources = true }
+                    }
                     if tab != 2 {
                         // Sources: Mihon's global search across every source; extensions: filter the list.
                         MihonIconButton("magnifyingglass", label: tab == 0 ? "全局搜索" : "搜索") {
@@ -91,6 +95,7 @@ public struct BrowseScreen: View {
             searchQuery = ""
             isSearching = false
         }
+        .sheet(isPresented: $showWebSources) { WebSourceSheet().environment(store) }
         .sheet(isPresented: $showLanguageSheet) {
             LanguageFilterSheet()
                 .environment(store)
@@ -269,7 +274,7 @@ private final class ExtensionListMemo {
         var model = Model()
         var availableByLang: [String: [ExtensionModel]] = [:]
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        for ext in store.extensions {
+        for ext in store.extensions where !ext.apkName.isEmpty {
             if !trimmed.isEmpty {
                 let matches = ext.name.localizedCaseInsensitiveContains(trimmed)
                     || ext.pkgName.localizedCaseInsensitiveContains(trimmed)
@@ -611,6 +616,8 @@ public struct BrowseSourceScreen: View {
     @State private var importTitle = ""
     @State private var showsKomgaSettings = false
 
+    @State private var bikaAccount: WebsiteLocation?
+
     private var isLocal: Bool { sourceId == MihonLocalSource.sourceId }
 
     public init(sourceId: Int64, listing: SourceListing, initialQuery: String? = nil) {
@@ -640,6 +647,10 @@ public struct BrowseSourceScreen: View {
                             .mihonTestAnchor("local.import")
                         // Upstream's local source shows its guide here instead of a WebView.
                         MihonIconButton("questionmark.circle", label: "本地图源指南") { openLocalSourceGuide() }
+                    } else if sourceId == BikaWebsite.sourceId {
+                        MihonIconButton("person.crop.circle", label: "哔咔账号") {
+                            bikaAccount = WebsiteLocation(url: BikaWebsite.accountURL)
+                        }
                     } else if let source {
                         Menu {
                             Button("在 WebView 中打开") {
@@ -686,6 +697,9 @@ public struct BrowseSourceScreen: View {
             }
             .environment(store)
             .mihonSheetChrome(colors)
+        }
+        .sheet(item: $bikaAccount, onDismiss: { reload() }) { location in
+            WebsiteSessionSheet(url: location.url)
         }
         .sheet(isPresented: $showsKomgaSettings, onDismiss: { reload() }) {
             KomgaSettingsSheet(sourceId: sourceId) { showsKomgaSettings = false }
@@ -751,7 +765,9 @@ public struct BrowseSourceScreen: View {
         } else if items.isEmpty, let errorMessage {
             MihonEmptyScreen(message: errorMessage, actions: [
                 (title: "重试", systemImage: "arrow.clockwise", action: { reload() })
-            ] + (KomgaLiveEngine.handles(sourceId: sourceId) ? [
+            ] + (sourceId == BikaWebsite.sourceId ? [
+                (title: "打开源站登录", systemImage: "person.crop.circle", action: { bikaAccount = WebsiteLocation(url: BikaWebsite.loginURL) })
+            ] : []) + (KomgaLiveEngine.handles(sourceId: sourceId) ? [
                 (title: "设置", systemImage: "gearshape", action: { showsKomgaSettings = true })
             ] : []))
         } else if items.isEmpty && isLocal && listing == .popular && searchedQuery.isEmpty {

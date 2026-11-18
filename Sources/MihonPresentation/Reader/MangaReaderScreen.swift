@@ -38,6 +38,7 @@ public struct MangaReaderScreen: View {
     @State private var currentChapter: Chapter
     @State private var pages: [Page] = []
     @State private var isLoadingPages = true
+    @State private var website: WebsiteLocation?
     @State private var loadError: String?
     @State private var currentPage = 0
     @State private var pagerPosition: Int?
@@ -302,6 +303,9 @@ public struct MangaReaderScreen: View {
                 .environment(store)
                 .mihonSheetChrome(colors, detents: [.medium, .large])
         }
+        .sheet(item: $website, onDismiss: { chapterLoadToken += 1 }) { location in
+            WebsiteSessionSheet(url: location.url)
+        }
         .onAppear {
             if sessionChapterIds == nil {
                 sessionChapterIds = store.readerChapters(mangaId: manga.id, currentChapterId: currentChapter.id).map(\.id)
@@ -394,6 +398,9 @@ public struct MangaReaderScreen: View {
                     .font(MihonType.bodyMedium)
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
+                if let url = store.websiteURL(sourceId: manga.source, path: currentChapter.url) {
+                    Button("打开源站") { website = WebsiteLocation(url: url) }
+                }
                 Button("重试") { chapterLoadToken += 1 }
                     .buttonStyle(MihonButtonStyle(.filled))
             }

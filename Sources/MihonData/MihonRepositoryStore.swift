@@ -45,9 +45,7 @@ public final class MihonDownloadTask: Identifiable {
 
 /// Launch-time switches for the app target.
 public enum MihonFeatureFlags {
-    /// Only MangaDex has a real source engine: every other extension source, the local source and tracker sign-in
-    /// serve generated demo data. Builds for testers hide them; `MIHON_DEMO_FEATURES=1` shows them again (the
-    /// desktop preview during development). Test stores always show them.
+    /// Tester builds show the live sources. Development previews can also show simulated extensions and trackers.
     public static var showsDemoFeatures: Bool {
         ProcessInfo.processInfo.environment["MIHON_DEMO_FEATURES"] == "1"
     }
@@ -244,6 +242,12 @@ public final class MihonRepositoryStore {
     public var libraryUpdateProgress: Double = 0.0
     /// Chapters found by library updates since the Updates tab was last opened (navigation badge).
     public private(set) var newUpdatesCount: Int = 0
+    private var importedRules: [Int64: HTMLSourceRule] = [:]
+    private static let rulesKey = "orihon.html-source-rules.v1"
+    public var importedSourceDescriptors: [ExtensionSourceDescriptor] {
+        extensions.filter { $0.pkgName.hasPrefix("org.orihon.import.") }.flatMap(\.sources)
+    }
+
     public var isSyncingExtensionRepos: Bool = false
     public var statusBannerMessage: String?
     /// Manga ids whose details/chapters are currently being fetched from their source.
@@ -320,6 +324,10 @@ public final class MihonRepositoryStore {
         #endif
         seedInitialMihonEcosystemData()
         if persistsState {
+            if let data = UserDefaults.standard.data(forKey: Self.rulesKey),
+               let rules = try? JSONDecoder().decode([HTMLSourceRule].self, from: data) {
+                for rule in rules { if let valid = try? rule.validated() { installRule(valid) } }
+            }
             MihonLocalStorage.createRootDirectory()
             if let data = MihonSecretStore.data(for: Self.komgaAccountsKey),
                let saved = try? JSONDecoder().decode([Int64: KomgaAccount].self, from: data) {
@@ -644,7 +652,7 @@ public final class MihonRepositoryStore {
         isSyncingExtensionRepos = true
         defer { isSyncingExtensionRepos = false }
 
-        var merged = extensions
+        var merged = extensions.filter { !$0.apkName.isEmpty }
         var indexByPkg = Dictionary(merged.enumerated().map { ($0.element.pkgName, $0.offset) }, uniquingKeysWith: { first, _ in first })
         var totalSynced = 0
         var totalAdded = 0
@@ -686,7 +694,9 @@ public final class MihonRepositoryStore {
             }
         }
 
-        extensions = merged
+        let websites = extensions.filter { $0.apkName.isEmpty }
+        let websitePackages = Set(websites.map(\.pkgName))
+        extensions = merged.filter { !websitePackages.contains($0.pkgName) } + websites
         if totalSynced > 0 {
             showStatusBanner("已同步扩展仓库：共 \(extensions.count) 个插件（新增 \(totalAdded) 个）")
         } else {
@@ -702,7 +712,7 @@ public final class MihonRepositoryStore {
         extensionRepos = MihonSeedData.repos
         // Without demo features only the extensions with a live engine remain, and the library holds their seed
         // entries plus a shelf of titles with Chinese chapters.
-        extensions = MihonSeedData.extensions.filter { ext in
+        extensions = (MihonSeedData.extensions + BundledWebsite.allCases.map(\.model) + [BikaWebsite.model]).filter { ext in
             showsDemoFeatures || ext.sources.contains { MihonLiveSources.handles($0) }
         }
         trackers = MihonSeedData.trackers
@@ -791,6 +801,7 @@ public final class MihonRepositoryStore {
         var inspections = apkInspectionsByPkg
         for idx in updated.indices where updated[idx].installState == .installed || updated[idx].installState == .hasUpdate {
             let ext = updated[idx]
+            guard !ext.apkName.isEmpty else { continue }
             if let (inspection, synthesized) = try? await apkSynthesizer.analyzeAndSynthesizeExtension(extensionModel: ext) {
                 inspections[ext.pkgName] = inspection
                 if !synthesized.isEmpty {
@@ -808,7 +819,7 @@ public final class MihonRepositoryStore {
     private func mergePreservingRemoteChanges(_ synthesized: [ExtensionModel]) -> [ExtensionModel] {
         let byPkg = Dictionary(synthesized.map { ($0.pkgName, $0) }, uniquingKeysWith: { first, _ in first })
         return extensions.map { current in
-            guard var local = byPkg[current.pkgName] else { return current }
+            guard !current.apkName.isEmpty, var local = byPkg[current.pkgName] else { return current }
             local.apkUrl = current.apkUrl ?? local.apkUrl
             local.iconUrl = current.iconUrl ?? local.iconUrl
             if current.sources.count > local.sources.count { local.sources = current.sources }
@@ -969,11 +980,12 @@ public final class MihonRepositoryStore {
 
     public func isLiveSource(_ sourceId: Int64) -> Bool {
         guard let descriptor = sourceDescriptor(for: sourceId) else { return false }
-        return MihonLiveSources.handles(descriptor)
+        return importedRules[sourceId] != nil || MihonLiveSources.handles(descriptor)
     }
 
     private func liveEngine(for descriptor: ExtensionSourceDescriptor) -> (any LiveSourceEngine)? {
-        MihonLiveSources.engine(
+        if let rule = importedRules[descriptor.id] { return HTMLRuleEngine(rule: rule) }
+        return MihonLiveSources.engine(
             for: descriptor,
             settings: MihonLiveSources.Settings(
                 allowNsfw: showNsfwSources, mangaDexDataSaver: mangaDexDataSaver, komgaAccounts: komgaAccounts
@@ -2471,6 +2483,48 @@ public final class MihonRepositoryStore {
         guard let idx = trackers.firstIndex(where: { $0.id == trackerId }) else { return }
         trackers[idx].isLoggedIn.toggle()
         trackers[idx].username = trackers[idx].isLoggedIn ? "demo_user" : nil
+    }
+
+    public func importHTMLSource(_ data: Data) throws {
+        guard data.count <= 64 * 1024 else { throw HTMLSourceError.invalidRule }
+        let rule = try JSONDecoder().decode(HTMLSourceRule.self, from: data).validated()
+        if let existing = sourceDescriptor(for: rule.id), importedRules[existing.id] == nil {
+            throw HTMLSourceError.invalidRule
+        }
+        installRule(rule)
+        saveRules()
+        showStatusBanner("已导入图源「\(rule.name)」")
+    }
+
+    private func installRule(_ rule: HTMLSourceRule) {
+        let model = rule.extensionModel(id: rule.id, package: "org.orihon.import.\(rule.id)")
+        importedRules[rule.id] = rule
+        if let index = extensions.firstIndex(where: { $0.pkgName == model.pkgName }) {
+            extensions[index] = model
+        } else {
+            extensions.append(model)
+        }
+    }
+
+    private func saveRules() {
+        // A reader reopened after a rule change must resolve its pages with the new selectors.
+        pageListGeneration &+= 1
+        pageListCache.removeAll()
+        if persistsState, let data = try? JSONEncoder().encode(Array(importedRules.values)) {
+            UserDefaults.standard.set(data, forKey: Self.rulesKey)
+        }
+    }
+
+    public func removeHTMLSource(id: Int64) {
+        guard importedRules.removeValue(forKey: id) != nil else { return }
+        extensions.removeAll { $0.pkgName == "org.orihon.import.\(id)" }
+        saveRules()
+    }
+
+    public func websiteURL(sourceId: Int64, path: String) -> URL? {
+        if sourceId == BikaWebsite.sourceId { return BikaWebsite.siteURL(path) }
+        let rule = importedRules[sourceId] ?? MihonLiveSources.websites[sourceId]?.rule
+        return rule?.siteURL(path)
     }
 
     // MARK: - Extension Repo Management

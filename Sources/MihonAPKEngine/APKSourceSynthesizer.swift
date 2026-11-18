@@ -303,7 +303,7 @@ public struct APKSynthesizedHttpSource: ParsedHttpSource, Sendable {
     public var name: String { descriptor.name }
     public var lang: String { descriptor.lang }
     public var isLocal: Bool { false }
-    public var supportsLatest: Bool { true }
+    public var supportsLatest: Bool { liveEngine?.supportsLatest ?? true }
     public var isNsfw: Bool { descriptor.isNsfw }
     public var baseUrl: String { descriptor.baseUrl }
     public var versionId: Int { max(1, inspection.manifest.versionCode) }

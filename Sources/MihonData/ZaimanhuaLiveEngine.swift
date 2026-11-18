@@ -16,7 +16,27 @@ public struct ZaimanhuaLiveEngine: LiveSourceEngine {
     private static let apiVersion = URLQueryItem(name: "_v", value: "2.2.5")
     private static let pageSize = 20
 
-    public init() {}
+    private let usesDmzjURLs: Bool
+
+    public init() { usesDmzjURLs = false }
+
+    init(usesDmzjURLs: Bool) { self.usesDmzjURLs = usesDmzjURLs }
+
+    // The DMZJ APK stores comic URLs in this form. Keep that identity in lists and backups.
+    private func storedManga(_ manga: SManga) -> SManga {
+        guard usesDmzjURLs else { return manga }
+        var result = manga
+        result.url = "/comic/comic_\(manga.url).json?version=2.7.019"
+        return result
+    }
+
+    private func comicId(_ url: String) throws -> String {
+        guard usesDmzjURLs else { return url }
+        guard let match = url.wholeMatch(of: #/\/comic\/comic_([0-9]+)\.json(?:\?version=[0-9.]+)?/#) else {
+            throw URLError(.badURL)
+        }
+        return String(match.1)
+    }
 
     public static func handles(baseUrl: String) -> Bool {
         baseUrl.contains("zaimanhua.com")
@@ -29,12 +49,12 @@ public struct ZaimanhuaLiveEngine: LiveSourceEngine {
             "/comic/rank/list",
             [URLQueryItem(name: "tag_id", value: "0"), URLQueryItem(name: "page", value: "\(page)")]
         )
-        return Self.mangasPage(response.data ?? [])
+        return mangasPage(response.data ?? [])
     }
 
     public func latestUpdates(page: Int) async throws -> MangasPage {
         let response: ZMResponse<[ZMListItem]> = try await get("/comic/update/list/0/\(page)", [])
-        return Self.mangasPage(response.data ?? [])
+        return mangasPage(response.data ?? [])
     }
 
     public func searchManga(page: Int, query: String, filters: [SourceFilter]) async throws -> MangasPage {
@@ -47,33 +67,35 @@ public struct ZaimanhuaLiveEngine: LiveSourceEngine {
             URLQueryItem(name: "page", value: "\(page)")
         ])
         let result = response.data
-        let mangas = (result?.list ?? []).compactMap(\.smanga)
-        return MangasPage(mangas: mangas, hasNextPage: page * Self.pageSize < (result?.total ?? 0))
+        return mangasPage(result?.list ?? [], hasNextPage: page * Self.pageSize < (result?.total ?? 0))
     }
 
     /// Ranking and update lists have no total; they simply run out (upstream: "没有更多结果了").
-    static func mangasPage(_ items: [ZMListItem]) -> MangasPage {
-        MangasPage(mangas: items.compactMap(\.smanga), hasNextPage: !items.isEmpty)
+    func mangasPage(_ items: [ZMListItem], hasNextPage: Bool? = nil) -> MangasPage {
+        MangasPage(mangas: items.compactMap(\.smanga).map(storedManga), hasNextPage: hasNextPage ?? !items.isEmpty)
     }
 
     // MARK: Details
 
     public func mangaDetails(manga: SManga) async throws -> SManga {
-        try await comic(id: manga.url, platform: nil).smanga
+        let detail = try await comic(id: comicId(manga.url), platform: nil)
+        return storedManga(detail.smanga)
     }
 
     public func mangaWebUrl(manga: SManga) -> String {
-        "\(Self.mobileBase)/pages/comic/detail?id=\(manga.url)"
+        guard let id = try? comicId(manga.url) else { return Self.mobileBase }
+        return "\(Self.mobileBase)/pages/comic/detail?id=\(id)"
     }
 
     // MARK: Chapters
 
     public func chapterList(manga: SManga) async throws -> [SChapter] {
-        var comic = try await comic(id: manga.url, platform: "pc")
+        let id = try comicId(manga.url)
+        var comic = try await comic(id: id, platform: "pc")
         if comic.isHideChapter == 1 && comic.canRead == true {
             // Titles that hide their chapter list from the app API still publish it on the PC API.
             let response: ZMResponse<ZMWrapper<ZMComic>> = try await get(
-                url: "\(Self.siteBase)/api/v1/comic2/comic/detail", [URLQueryItem(name: "id", value: manga.url)], platform: "pc"
+                url: "\(Self.siteBase)/api/v1/comic2/comic/detail", [URLQueryItem(name: "id", value: id)], platform: "pc"
             )
             comic = try Self.unwrap(response)
         }

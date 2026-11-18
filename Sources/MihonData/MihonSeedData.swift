@@ -25,6 +25,8 @@ enum MihonSeedData {
 
     /// Source id of `zh.zaimanhua` in Keiyoushi's `index.pb` (MD5 of `再漫画/zh/1`, as upstream derives ids).
     static let zaimanhuaSourceId: Int64 = 524_579_092_615_598_717
+    /// Original Android source ID derived from 动漫之家/zh/1.
+    static let dmzjSourceId: Int64 = 2_884_190_037_559_093_788
     /// Source id of `zh.dongmanmanhua` in Keiyoushi's `index.pb`.
     static let dongmanSourceId: Int64 = 4_222_375_517_460_530_289
 
@@ -148,6 +150,17 @@ enum MihonSeedData {
                     chapterSelector: "json.data.data.chapters[*].data[*]",
                     pageSelector: "json.data.data.page_url_hd[*]"
                 )
+            ]
+        ),
+        ExtensionModel(
+            name: "动漫之家（再漫画）", pkgName: "eu.kanade.tachiyomi.extension.zh.dmzj",
+            versionName: "1", versionCode: 1, lang: "zh", apkName: "", installState: .installed,
+            sources: [
+                ExtensionSourceDescriptor(id: dmzjSourceId, name: "动漫之家（再漫画）", lang: "zh",
+                    baseUrl: ZaimanhuaLiveEngine.siteBase, multiSrcTemplate: "HttpSource (JSON API)",
+                    popularPath: "/comic/rank/list?tag_id=0", latestPath: "/comic/update/list/0/{page}",
+                    searchPath: "/search/index?keyword={query}", popularSelector: "json.data[*]",
+                    chapterSelector: "json.data.data.chapters[*].data[*]", pageSelector: "json.data.data.page_url_hd[*]")
             ]
         ),
         // Live (`DongmanLiveEngine`): LINE Webtoon's licensed Chinese edition, free on the web.

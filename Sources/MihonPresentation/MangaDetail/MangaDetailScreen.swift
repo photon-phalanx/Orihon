@@ -51,6 +51,7 @@ public struct MangaDetailScreen: View {
 
     public let mangaId: Int64
 
+    @State private var website: WebsiteLocation?
     @State private var descriptionExpanded = false
     @State private var selection: Set<Int64> = []
     @State private var scrollState = MangaDetailScrollState()
@@ -190,6 +191,11 @@ public struct MangaDetailScreen: View {
         .task(id: manga.id) {
             await store.refreshMangaFromSource(mangaId: manga.id)
         }
+        .sheet(item: $website, onDismiss: {
+            Task { await store.refreshMangaFromSource(mangaId: manga.id, force: true) }
+        }) { location in
+            WebsiteSessionSheet(url: location.url)
+        }
         .sheet(isPresented: $showChapterSettings) {
             ChapterSettingsSheet(mangaId: manga.id)
                 .environment(store)
@@ -284,7 +290,9 @@ public struct MangaDetailScreen: View {
                     Button("刷新") { Task { await store.refreshMangaFromSource(mangaId: manga.id, force: true) } }
                     Button("设置分类") { showCategories = true }
                     Button("编辑注释") { showNotes = true }
-                    if let source = store.catalogueSource(for: manga.source) {
+                    if let url = store.websiteURL(sourceId: manga.source, path: manga.url) {
+                        Button("打开源站") { website = WebsiteLocation(url: url) }
+                    } else if let source = store.catalogueSource(for: manga.source) {
                         Button("在浏览器中打开") {
                             let smanga = SManga(url: manga.url, title: manga.title)
                             if let url = URL(string: source.getMangaUrl(manga: smanga)) { openURL(url) }

@@ -15,7 +15,9 @@ final class MihonLiveSourceTests: XCTestCase {
     // MARK: - 再漫画 (offline)
 
     func testZaimanhuaListsMapToMangas() throws {
-        let rank = ZaimanhuaLiveEngine.mangasPage(try fixture("rank", as: ZMResponse<[ZMListItem]>.self).data ?? [])
+        let engine = ZaimanhuaLiveEngine()
+        let items = try fixture("rank", as: ZMResponse<[ZMListItem]>.self).data ?? []
+        let rank = engine.mangasPage(items)
         XCTAssertEqual(rank.mangas.map(\.url), ["87148", "19526", "20844"])
         XCTAssertTrue(rank.hasNextPage)
         XCTAssertEqual(rank.mangas[0].title, "我们的葬礼")
@@ -26,13 +28,18 @@ final class MihonLiveSourceTests: XCTestCase {
         XCTAssertEqual(rank.mangas[2].status, .ongoing)
 
         // Update lists send `id: 0` next to the real `comic_id`, search results the other way round.
-        let latest = ZaimanhuaLiveEngine.mangasPage(try fixture("latest", as: ZMResponse<[ZMListItem]>.self).data ?? [])
+        let latest = engine.mangasPage(try fixture("latest", as: ZMResponse<[ZMListItem]>.self).data ?? [])
         XCTAssertEqual(latest.mangas.map(\.url), ["69741", "89071"])
         let search = try XCTUnwrap(try fixture("search", as: ZMResponse<ZMSearchPage>.self).data)
         XCTAssertEqual(search.list?.compactMap(\.smanga).map(\.url), ["87297", "56793"])
         XCTAssertEqual(search.total, 16)
 
-        XCTAssertFalse(ZaimanhuaLiveEngine.mangasPage([]).hasNextPage, "an empty page ends the list")
+        XCTAssertFalse(engine.mangasPage([]).hasNextPage, "an empty page ends the list")
+
+        let dmzj = ZaimanhuaLiveEngine(usesDmzjURLs: true)
+        let oldBook = dmzj.mangasPage(items).mangas[1]
+        XCTAssertEqual(oldBook.url, "/comic/comic_19526.json?version=2.7.019")
+        XCTAssertEqual(dmzj.mangaWebUrl(manga: oldBook), engine.mangaWebUrl(manga: rank.mangas[1]))
     }
 
     func testZaimanhuaDetailsAndChapters() throws {

@@ -198,6 +198,7 @@ public enum SourceListing: String, Hashable, Codable, Sendable {
 /// Kotlin extension bytecode cannot run on iOS, so extensions whose upstream implementation talks to a
 /// documented JSON API (e.g. MangaDex) are backed by a Swift engine that issues the same requests.
 public protocol LiveSourceEngine: Sendable {
+    var supportsLatest: Bool { get }
     func popularManga(page: Int) async throws -> MangasPage
     func latestUpdates(page: Int) async throws -> MangasPage
     func searchManga(page: Int, query: String, filters: [SourceFilter]) async throws -> MangasPage
@@ -210,5 +211,6 @@ public protocol LiveSourceEngine: Sendable {
 }
 
 extension LiveSourceEngine {
+    public var supportsLatest: Bool { true }
     public var preferredReadingMode: ReadingMode? { nil }
 }

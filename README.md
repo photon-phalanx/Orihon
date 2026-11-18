@@ -11,6 +11,45 @@ Orihon 是开源漫画阅读器 **[Mihon](https://github.com/mihonapp/mihon)** �
 - **翻页**：默认平移翻页；也可以选仿真卷页（测试中），像翻纸书一样翻过书脊。
 - **章节衔接**：读到章末时在后台预载下一话，翻过章节卡片直接就是下一话的第一个跨页，不黑屏、不转圈。
 
+## iPhone 上添加图源
+
+在「浏览 → 图源」选择站点。拷贝漫画沿用插件的 18+ 标记，需要先在图源筛选中打开「显示 18+ 图源与插件」。拷贝漫画、包子漫画、GoDa 漫画和漫画人使用 Swift 解析站点的目录和书页。vomic 的动态阅读页使用系统 WebKit。在作品详情的「⋯ → 打开源站」或阅读器提示登录时的「打开源站」进入 vomic。登录后点「完成」，阅读器会使用同一登录状态重新载入本章。
+
+哔咔漫画也使用 18+ 开关。进入「浏览 → 图源 → 哔咔漫画」，点「打开源站登录」，登录后点「完成」。右上角的「哔咔账号」可以查看或切换账号。热门、最近更新、搜索和章节阅读共用这次登录，重启 Orihon 后仍可使用。加载新目录和书页时需保持 Orihon 在前台。
+
+「动漫之家（再漫画）」保留 Android 动漫之家插件的图源编号、作品地址和章节编号，使用再漫画的目录和书页。恢复 Mihon 备份后，两站编号一致且再漫画仍提供的章节可以接着读。原「再漫画」图源仍使用自己的书架标识。[旧插件下架记录](https://github.com/keiyoushi/extensions-source/pull/10248) · [再漫画来源说明](https://github.com/keiyoushi/extensions-source/issues/5015)
+
+附件中还有两个源暂时无法验证阅读。嗨皮漫画的旧站已由插件维护者标为停用。Comick 的新版目录仍可查询章节，但在 2026-11-18 核验时，官方示例和《BLUELOCK》的新旧章节都返回了空的图片列表。[嗨皮漫画下架记录](https://github.com/keiyoushi/extensions-source/pull/18625) · [Comick 书页接口](https://api.comick.dev/docs/#tag/chapter/GET/chapter/%7Bhid%7D/get_images)
+
+对于提供普通 HTML 列表、章节链接和图片的站点，选择「浏览 → 图源 → ＋ → 从文件导入 JSON 图源」。
+
+可以先把[《小辣椒与萝卜头》中文图源文件](./Examples/Sources/peppercarrot-zh.json)保存到 iPhone 的「文件」再导入。规则直接读取 David Revoy 的[官方中文目录](https://www.peppercarrot.com/cn/webcomics/peppercarrot.html)。像这样的单页作品目录可以省略 `search`，Orihon 会按书名搜索。站点没有更新列表时可省略 `latest`。
+
+为其他网站编写图源时，将下面模板中的域名、路径及 CSS 选择器替换成该站的实际值并保存为 UTF-8 的 `.json` 文件。
+
+```json
+{
+  "version": 1,
+  "name": "我的漫画站",
+  "lang": "zh",
+  "baseUrl": "https://comics.example.org",
+  "popular": "/popular?page={page}",
+  "latest": "/updates?page={page}",
+  "search": "/search?q={query}&page={page}",
+  "cards": ".series-card",
+  "cardTitle": ".series-title",
+  "title": "h1",
+  "chapters": ".chapter-list a[href]",
+  "oldestFirst": true,
+  "images": ".reader img",
+  "next": "a[rel=next]"
+}
+```
+
+`cards` 选中的每个元素应包含作品链接，可以就是链接本身。封面从卡片中的首个 `img` 或 `amp-img` 读取。章节名默认取链接文字，嵌套标题可指定 `chapterTitle`。源站按最早章节在前排列时使用 `oldestFirst`。书页图片依次读取 `data-src`、`data-original`、`src`。单页列表可省略路径里的 `{page}` 和 `next`。搜索词会自动编码。相同站址的规则再次导入会更新解析方式并保留书架关联。规则文件可分享给其他用户。
+
+JSON 规则在手机上由内置解析器读取。依赖专用 API、登录流程或客户端脚本的站点可以实现 `LiveSourceEngine`，随 App 更新分发。Android 插件作者提供的 APK 可作为移植参考。
+
 ## 架构概览
 
 1. **`Sources/MihonDomain` (核心领域层)**

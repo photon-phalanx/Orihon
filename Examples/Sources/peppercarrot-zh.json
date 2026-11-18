@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "小辣椒与萝卜头",
+  "lang": "zh",
+  "baseUrl": "https://www.peppercarrot.com",
+  "popular": "/cn/webcomics/peppercarrot.html",
+  "cards": "a#peppercarrot",
+  "title": "h2",
+  "chapters": "figure.thumbnail figcaption a",
+  "images": ".webcomic-page img[title]"
+}

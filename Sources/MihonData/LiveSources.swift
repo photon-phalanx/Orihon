@@ -19,9 +19,12 @@ public enum MihonLiveSources {
         }
     }
 
+    static let websites = Dictionary(uniqueKeysWithValues: BundledWebsite.allCases.map { ($0.sourceId, $0) })
+
     /// Komga is recognised by its source ids: its address is the user's.
     public static func handles(_ descriptor: ExtensionSourceDescriptor) -> Bool {
-        handles(baseUrl: descriptor.baseUrl) || KomgaLiveEngine.handles(sourceId: descriptor.id)
+        descriptor.id == BikaWebsite.sourceId || websites[descriptor.id] != nil || descriptor.id == MihonSeedData.dmzjSourceId
+            || handles(baseUrl: descriptor.baseUrl) || KomgaLiveEngine.handles(sourceId: descriptor.id)
     }
 
     public static func handles(baseUrl: String) -> Bool {
@@ -32,6 +35,11 @@ public enum MihonLiveSources {
     }
 
     public static func engine(for descriptor: ExtensionSourceDescriptor, settings: Settings) -> (any LiveSourceEngine)? {
+        if descriptor.id == BikaWebsite.sourceId { return BikaWebsite() }
+        if let website = websites[descriptor.id] {
+            if website == .copy { return CopyWebsite() }
+            return HTMLRuleEngine(rule: website.rule, site: website)
+        }
         if KomgaLiveEngine.handles(sourceId: descriptor.id) {
             return KomgaLiveEngine(account: settings.komgaAccounts[descriptor.id] ?? KomgaAccount())
         }
@@ -42,8 +50,9 @@ public enum MihonLiveSources {
                 dataSaver: settings.mangaDexDataSaver
             )
         }
-        if ZaimanhuaLiveEngine.handles(baseUrl: descriptor.baseUrl) {
-            return ZaimanhuaLiveEngine()
+        let isDmzj = descriptor.id == MihonSeedData.dmzjSourceId
+        if isDmzj || ZaimanhuaLiveEngine.handles(baseUrl: descriptor.baseUrl) {
+            return ZaimanhuaLiveEngine(usesDmzjURLs: isDmzj)
         }
         if DongmanLiveEngine.handles(baseUrl: descriptor.baseUrl) {
             return DongmanLiveEngine()

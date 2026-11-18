@@ -138,10 +138,14 @@ final class MihonAPKSecurityTests: XCTestCase {
             let payload = Array(compressed.prefix(written))
             let name = Array(entry.name.utf8)
             let size = entry.declaredSize ?? UInt32(entry.data.count)
-            let header = u32(0x0403_4B50) + [20, 0, 0, 0, 8, 0, 0, 0, 0, 0] + u32(0) + u32(UInt32(payload.count)) + u32(size)
-                + [UInt8(name.count), 0, 0, 0] + name
-            central += u32(0x0201_4B50) + [20, 0, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0] + u32(0) + u32(UInt32(payload.count)) + u32(size)
-                + [UInt8(name.count), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] + u32(UInt32(local.count)) + name
+            let sizes = u32(0) + u32(UInt32(payload.count)) + u32(size)
+            var header = u32(0x0403_4B50) + [20, 0, 0, 0, 8, 0, 0, 0, 0, 0]
+            header += sizes
+            header += [UInt8(name.count), 0, 0, 0] + name
+            central += u32(0x0201_4B50) + [20, 0, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0]
+            central += sizes
+            central += [UInt8(name.count), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            central += u32(UInt32(local.count)) + name
             local += header + payload
         }
         let end = u32(0x0605_4B50) + [0, 0, 0, 0, UInt8(entries.count), 0, UInt8(entries.count), 0]

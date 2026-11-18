@@ -100,8 +100,13 @@ public actor MihonNetworkClient {
     /// Unthrottled request path for CDN assets (covers, extension icons, chapter pages). Asks for an image, as
     /// upstream's image requests do: Komga answers `*/*` for a PDF book's page with the PDF itself.
     public nonisolated func fetchAsset(url: URL, headers: [String: String] = [:]) async throws -> Data {
-        let accept = headers.keys.contains { $0.caseInsensitiveCompare("Accept") == .orderedSame } ? [:] : ["Accept": "image/*,*/*;q=0.8"]
-        return try await Self.transfer(session: session, url: url, headers: accept.merging(headers) { _, given in given }, userAgent: defaultUserAgent).0
+        var imageHeaders = headers
+        if headers.keys.allSatisfy({ $0.caseInsensitiveCompare("Accept") != .orderedSame }) {
+            imageHeaders["Accept"] = "image/*,*/*;q=0.8"
+        }
+        // DM5's CDN checks the specific referring chapter for both online viewing and offline downloads.
+        if let referer = ManhuarenWebsite.imageReferer(url) { imageHeaders["Referer"] = referer }
+        return try await Self.transfer(session: session, url: url, headers: imageHeaders, userAgent: defaultUserAgent).0
     }
 
     private static func transfer(

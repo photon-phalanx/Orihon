@@ -146,15 +146,15 @@ final class MihonRuntimeSelfTests: XCTestCase {
             guard await driver.tap("icon.返回", settle: 0.8) else { return false }
             return noTracking && driver.hasAnchor("nav.浏览")
         }
-        await recorder.step("浏览：只有真实图源（MangaDex、再漫画、咚漫、本地图源）") {
+        await recorder.step("浏览：显示可用图源和图源管理入口") {
             guard await driver.tap("nav.浏览", settle: 0.8) else { return false }
             let sources = driver.anchors(withPrefix: "source.").filter { !$0.hasPrefix("source.latest.") }
-            let live = sources.allSatisfy { anchor in
-                ["source.MangaDex.", "source.再漫画.", "source.咚漫.", "source.Komga.", "source.本地图源."].contains { anchor.hasPrefix($0) }
-            }
+            let liveSources = store.activeCatalogueSources().filter(\.isLive) + [store.localCatalogueSource]
+            let liveAnchors = Set(liveSources.map { "source.\($0.name).\($0.lang)" })
+            let live = !sources.isEmpty && Set(sources).isSubset(of: liveAnchors)
             // 图源 and 迁移, never the demo extensions.
             return !driver.hasAnchor("tab.插件") && driver.hasAnchor("tab.迁移") && live
-                && sources.contains("source.再漫画.zh") && sources.contains("source.咚漫.zh-Hans")
+                && driver.hasAnchor("icon.管理图源") && sources.contains("source.包子漫画.zh")
         }
         await recorder.step("浏览：本地图源可导入并返回") {
             // Listed last, under "其他".
@@ -355,8 +355,8 @@ final class MihonRuntimeSelfTests: XCTestCase {
             guard await driver.tap("icon.置顶漫画DB", settle: 0.8) else { return false }
             return await driver.waitFor { store.pinnedSourceIds.contains(1004) && driver.hasAnchor("icon.取消置顶漫画DB") }
         }
-        await recorder.step("打开图源「包子漫画」") {
-            guard await driver.tap("source.包子漫画.zh", settle: 1.2) else { return false }
+        await recorder.step("打开演示图源「漫画DB」") {
+            guard await driver.tap("source.漫画DB.zh", settle: 1.2) else { return false }
             return await driver.waitFor { driver.hasAnchor("chip.最近更新") }
         }
         await recorder.step("图源切换「最近更新」") {

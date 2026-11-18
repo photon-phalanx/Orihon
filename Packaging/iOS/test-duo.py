@@ -96,15 +96,19 @@ def main():
         tap(0.50, 0.50)
         time.sleep(1)
         duo("screenshot", SHOTS / "06-rotated-controls.png")
-        duo("tap", "--label", "返回")
-        deadline = time.monotonic() + 20
+        # On the landscape cover the 48 pt Back button sits at the leading edge
+        # of the 64 pt top bar. Touch its centre through the active display.
+        duo("tap", 28, 32)
+        returned = SHOTS / "07-returned.png"
+        deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
-            if any("书架" in (item["label"] or "") for item in json.loads(duo("elements"))):
+            duo("screenshot", returned)
+            labels = output("xcrun", "swift", Path(__file__).with_name("screen-text.swift"), returned)
+            if "书架" in labels or "書架" in labels:
                 break
             time.sleep(1)
         else:
-            raise SystemExit("Back did not return to the library")
-        duo("screenshot", SHOTS / "07-returned.png")
+            raise SystemExit(f"Back did not return to the library; visible text: {labels}")
     finally:
         subprocess.run([*simctl, "delete", udid], check=False)
 

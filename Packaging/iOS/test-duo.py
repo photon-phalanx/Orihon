@@ -54,6 +54,14 @@ def check_screen(name, expected, timeout=35):
     raise SystemExit(f"{name}: expected {expected}, saw {other}; see {shot}")
 
 
+def library_title(screenshot):
+    # A small visual reference for the two title glyphs on the rotated cover.
+    # Ignore the changing manga covers, counts, and system status indicators.
+    with Image.open(screenshot) as image:
+        cover = image.convert("L").resize((678, 466), Image.Resampling.LANCZOS)
+    return cover.crop((10, 12, 62, 52)).point(lambda value: 255 if value < 140 else 0)
+
+
 def main():
     simctl = ["xcrun", "simctl"]
     runtimes = json.loads(output(*simctl, "list", "runtimes", "-j"))["runtimes"]
@@ -100,15 +108,19 @@ def main():
         # of the 64 pt top bar. Touch its centre through the active display.
         duo("tap", 28, 32)
         returned = SHOTS / "07-returned.png"
-        deadline = time.monotonic() + 60
+        with Image.open(Path(__file__).with_name("library-title.png")) as template:
+            title_pixels = list(template.convert("L").getdata())
+        deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
             duo("screenshot", returned)
-            labels = output("xcrun", "swift", Path(__file__).with_name("screen-text.swift"), returned)
-            if "书架" in labels or "書架" in labels:
+            screen_pixels = list(library_title(returned).getdata())
+            overlap = sum(a and b for a, b in zip(title_pixels, screen_pixels))
+            union = sum(a or b for a, b in zip(title_pixels, screen_pixels))
+            if overlap > union * 0.8:
                 break
             time.sleep(1)
         else:
-            raise SystemExit(f"Back did not return to the library; visible text: {labels}")
+            raise SystemExit(f"Back did not reveal the library title; see {returned}")
     finally:
         subprocess.run([*simctl, "delete", udid], check=False)
 

@@ -1,5 +1,6 @@
 # Build output (release binaries, IPAs, caches)
 .build/
+/dist/
 .swiftpm/
 *.ipa
 *.xcarchive

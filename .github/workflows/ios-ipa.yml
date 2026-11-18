@@ -1,0 +1,71 @@
+name: Build Orihon IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['ios-build-*']
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
+jobs:
+  ipa:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the device toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -version | grep -Fx 'Xcode 27.2'
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = 27.2
+      - name: Build the unsigned IPA
+        run: python3 Packaging/iOS/build-app.py "$GITHUB_RUN_NUMBER"
+      - uses: actions/upload-artifact@v7
+        with:
+          path: dist/Orihon-unsigned.ipa
+          archive: false
+          if-no-files-found: error
+
+  duo:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the simulator app
+        run: |
+          xcodebuild -version | grep -Fx 'Xcode 27.2'
+          test "$(xcrun --sdk iphonesimulator --show-sdk-version)" = 27.2
+          python3 Packaging/iOS/build-app.py "$GITHUB_RUN_NUMBER" --simulator
+      - uses: actions/checkout@v7
+        with:
+          repository: skarol/duoctl
+          ref: c6ff3e961a9858fb061907448e702d7d1617dc4a # v0.2.1
+          path: .duoctl
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install the accessibility inspector for the Back button check
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLo axe.tar.gz https://github.com/cameroncooke/AXe/releases/download/v2.0.4/AXe-macOS-homebrew-v2.0.4.tar.gz
+          echo '4997a7305814d1bcbb925bf1f81667177e204fe58855d99c4896b85d749e181a  axe.tar.gz' | shasum -a 256 -c -
+          mkdir axe && tar -xzf axe.tar.gz -C axe
+          echo "$RUNNER_TEMP/axe" >> "$GITHUB_PATH"
+      - name: Exercise the Duo reader
+        env:
+          DUOCTL: ${{ github.workspace }}/.duoctl/bin/duoctl
+        run: |
+          python -m pip install --only-binary=:all: Pillow==12.0.0
+          python Packaging/iOS/test-duo.py
+      - name: Save Duo screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Orihon-Duo-screenshots
+          path: dist/duo-screenshots/*.png
+          if-no-files-found: warn

@@ -138,6 +138,12 @@ private struct SourcesTab: View {
                 }
                 .padding(.bottom, 16)
             }
+            .task {
+                let id = BikaWebsite.sourceId
+                guard store.lastUsedSourceId == id || store.pinnedSourceIds.contains(id),
+                      let engine = sources.first(where: { $0.id == id })?.liveEngine as? BikaWebsite else { return }
+                _ = try? await engine.popularManga(page: 1)
+            }
         }
     }
 
@@ -601,13 +607,15 @@ public struct BrowseSourceScreen: View {
     @State private var page = 0
     @State private var hasNextPage = true
     @State private var isLoading = false
-    @State private var errorMessage: String?
+    @State private var listingError: (any Error)?
     /// A later page that failed: the list stays and offers a retry instead of ending there.
     @State private var nextPageError: String?
     /// The search the listing shows; what is being typed only counts once submitted.
     @State private var searchedQuery = ""
     /// Covers warmed so far (see `warmCovers(after:)`).
     @State private var coversWarmedUpTo = 0
+    @State private var showingSavedPage = false
+    @State private var bikaFilter: BikaCatalogueFilter?
     @State private var showFilters = false
     @State private var loadGeneration = 0
     /// Local source: picking files, and the picked files waiting for a title.
@@ -615,8 +623,6 @@ public struct BrowseSourceScreen: View {
     @State private var pendingImport: [URL]?
     @State private var importTitle = ""
     @State private var showsKomgaSettings = false
-
-    @State private var bikaAccount: WebsiteLocation?
 
     private var isLocal: Bool { sourceId == MihonLocalSource.sourceId }
 
@@ -633,7 +639,7 @@ public struct BrowseSourceScreen: View {
             if isSearching {
                 MihonSearchAppBar(query: $query, onClose: {
                     isSearching = false
-                    if listing == .search { switchListing(.popular) }
+                    if listing == .search && bikaFilter == nil { switchListing(.popular) }
                 }, onSubmit: { switchListing(.search) })
             } else {
                 MihonTopAppBar(
@@ -649,7 +655,7 @@ public struct BrowseSourceScreen: View {
                         MihonIconButton("questionmark.circle", label: "本地图源指南") { openLocalSourceGuide() }
                     } else if sourceId == BikaWebsite.sourceId {
                         MihonIconButton("person.crop.circle", label: "哔咔账号") {
-                            bikaAccount = WebsiteLocation(url: BikaWebsite.accountURL)
+                            navigator.openBikaAccount(BikaWebsite.accountURL)
                         }
                     } else if let source {
                         Menu {
@@ -672,11 +678,25 @@ public struct BrowseSourceScreen: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MihonPadding.small) {
-                    MihonFilterChip(label: "热门", selected: listing == .popular) { switchListing(.popular) }
+                    MihonFilterChip(label: sourceId == BikaWebsite.sourceId ? "百合花园" : "热门", selected: listing == .popular) { switchListing(.popular) }
                     if source?.supportsLatest ?? true {
                         MihonFilterChip(label: "最近更新", selected: listing == .latest) { switchListing(.latest) }
                     }
-                    MihonFilterChip(label: "筛选", selected: listing == .search) { showFilters = true }
+                    MihonFilterChip(label: "筛选", selected: sourceId == BikaWebsite.sourceId ? bikaFilter != nil : listing == .search) { showFilters = true }
+                    if showingSavedPage {
+                        if isLoading {
+                            ProgressView().controlSize(.small)
+                                .accessibilityLabel("正在更新上次的书单")
+                                .accessibilityIdentifier("bika.catalogue.refreshing")
+                        } else if let nextPageError {
+                            Button("上次书单 · 重试") {
+                                self.nextPageError = nil
+                                Task { await loadNextPage(source: source) }
+                            }
+                            .buttonStyle(MihonButtonStyle(.text))
+                            .accessibilityHint(nextPageError)
+                        }
+                    }
                 }
                 .padding(.horizontal, MihonPadding.small)
                 .padding(.vertical, MihonPadding.extraSmall)
@@ -688,18 +708,32 @@ public struct BrowseSourceScreen: View {
         }
         .background(colors.background)
         .task(id: "\(sourceId)|\(listing.rawValue)|\(loadGeneration)") {
-            if items.isEmpty { await loadNextPage(source: source) }
+            if items.isEmpty || showingSavedPage { await loadNextPage(source: source) }
         }
         .sheet(isPresented: $showFilters) {
-            SourceFilterSheet(source: source, query: $query) {
-                showFilters = false
-                switchListing(.search)
+            if let engine = source?.liveEngine as? BikaWebsite {
+                BikaFilterSheet(engine: engine, applied: bikaFilter) { filter in
+                    showFilters = false
+                    isSearching = false
+                    query = ""
+                    bikaFilter = filter
+                    listing = .search
+                    reload()
+                }
+                .mihonSheetChrome(colors, detents: [.large])
+            } else {
+                SourceFilterSheet(source: source, query: $query) {
+                    showFilters = false
+                    switchListing(.search)
+                }
+                .environment(store)
+                .mihonSheetChrome(colors)
             }
-            .environment(store)
-            .mihonSheetChrome(colors)
         }
-        .sheet(item: $bikaAccount, onDismiss: { reload() }) { location in
-            WebsiteSessionSheet(url: location.url)
+        .onChange(of: navigator.bikaAccountRevision) { _, _ in
+            if sourceId == BikaWebsite.sourceId {
+                reload()
+            }
         }
         .sheet(isPresented: $showsKomgaSettings, onDismiss: { reload() }) {
             KomgaSettingsSheet(sourceId: sourceId) { showsKomgaSettings = false }
@@ -762,11 +796,11 @@ public struct BrowseSourceScreen: View {
             MihonEmptyScreen(message: "图源未安装")
         } else if items.isEmpty && isLoading {
             MihonLoadingScreen()
-        } else if items.isEmpty, let errorMessage {
-            MihonEmptyScreen(message: errorMessage, actions: [
+        } else if items.isEmpty, let listingError {
+            MihonEmptyScreen(message: listingError.localizedDescription, actions: [
                 (title: "重试", systemImage: "arrow.clockwise", action: { reload() })
-            ] + (sourceId == BikaWebsite.sourceId ? [
-                (title: "打开源站登录", systemImage: "person.crop.circle", action: { bikaAccount = WebsiteLocation(url: BikaWebsite.loginURL) })
+            ] + ((listingError as? BikaReadError) == .login ? [
+                (title: "打开源站登录", systemImage: "person.crop.circle", action: { navigator.openBikaAccount(BikaWebsite.loginURL) })
             ] : []) + (KomgaLiveEngine.handles(sourceId: sourceId) ? [
                 (title: "设置", systemImage: "gearshape", action: { showsKomgaSettings = true })
             ] : []))
@@ -791,7 +825,7 @@ public struct BrowseSourceScreen: View {
                     }
                 }
                 .padding(8)
-                if let nextPageError {
+                if let nextPageError, !showingSavedPage {
                     VStack(spacing: MihonPadding.small) {
                         Text(nextPageError)
                             .font(MihonType.bodyMedium)
@@ -805,26 +839,32 @@ public struct BrowseSourceScreen: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 24)
-                } else if isLoading || hasNextPage {
+                } else if !showingSavedPage && (isLoading || hasNextPage) {
                     MihonCircularProgress(size: 32, lineWidth: 3)
                         .padding(.vertical, 24)
                         .onAppear { Task { await loadNextPage(source: source) } }
                 }
             }
-            .refreshable { reload() }
+            .accessibilityIdentifier("source.catalogue.results")
+            .refreshable {
+                if sourceId == BikaWebsite.sourceId { BikaWebsite.invalidateLiveListings() }
+                reload()
+            }
         }
     }
 
     private func switchListing(_ newListing: SourceListing) {
+        bikaFilter = nil
         listing = newListing
         reload()
     }
 
     private func reload() {
         items = []
+        showingSavedPage = false
         page = 0
         hasNextPage = true
-        errorMessage = nil
+        listingError = nil
         nextPageError = nil
         coversWarmedUpTo = 0
         searchedQuery = query
@@ -850,22 +890,48 @@ public struct BrowseSourceScreen: View {
         isLoading = true
         let generation = loadGeneration
         let nextPage = page + 1
+        if nextPage == 1, !showingSavedPage, let engine = source.liveEngine as? BikaWebsite,
+           let saved = await engine.savedLandingPage(for: listing) {
+            guard generation == loadGeneration else { return }
+            items = saved.mangas
+            showingSavedPage = true
+        }
         do {
             let result: MangasPage
             switch listing {
             case .popular: result = try await source.getPopularManga(page: nextPage)
             case .latest: result = try await source.getLatestUpdates(page: nextPage)
-            case .search: result = try await source.getSearchManga(page: nextPage, query: searchedQuery, filters: source.getFilterList())
+            case .search:
+                if let bikaFilter, let engine = source.liveEngine as? BikaWebsite {
+                    result = try await engine.filteredManga(page: nextPage, filter: bikaFilter)
+                } else {
+                    result = try await source.getSearchManga(page: nextPage, query: searchedQuery, filters: source.getFilterList())
+                }
             }
             guard generation == loadGeneration else { return }
-            let known = Set(items.map(\.url))
-            items.append(contentsOf: result.mangas.filter { !known.contains($0.url) })
+            if showingSavedPage {
+                items = result.mangas
+                showingSavedPage = false
+                coversWarmedUpTo = 0
+            } else {
+                let known = Set(items.map(\.url))
+                items.append(contentsOf: result.mangas.filter { !known.contains($0.url) })
+            }
             page = nextPage
             hasNextPage = result.hasNextPage && !result.mangas.isEmpty
         } catch {
             guard generation == loadGeneration else { return }
-            if items.isEmpty {
-                errorMessage = error.localizedDescription
+            if sourceId == BikaWebsite.sourceId, (error as? BikaReadError) == .login {
+                items = []
+                showingSavedPage = false
+                listingError = error
+                hasNextPage = false
+            } else if Task.isCancelled && showingSavedPage {
+                loadGeneration += 1
+            } else if showingSavedPage {
+                nextPageError = "当前显示上次的书单。更新失败：\(error.localizedDescription)"
+            } else if items.isEmpty {
+                listingError = error
                 hasNextPage = false
             } else {
                 // Upstream keeps what loaded and offers a retry; the next page is not given up on.

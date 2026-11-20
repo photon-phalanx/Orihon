@@ -33,6 +33,8 @@ public enum MihonSettingsPage: Hashable {
 public final class MihonNavigator: @unchecked Sendable {
     public internal(set) var isDualPane = false
     public internal(set) var selectedMangaId: Int64?
+    fileprivate(set) var bikaAccountRevision = 0
+    @ObservationIgnored var openBikaAccount: (URL) -> Void = { _ in }
     @ObservationIgnored var openMangaHandler: (Int64) -> Void = { _ in }
     @ObservationIgnored var openReaderHandler: (Manga, Chapter) -> Void = { _, _ in }
     @ObservationIgnored var pushHandler: (MihonRoute) -> Void = { _ in }
@@ -110,6 +112,14 @@ public struct MihonRootView: View {
     @State private var activeReaderSession: ActiveReaderSession?
     @State private var navigator = MihonNavigator()
     @State private var isUnfolded = false
+    // iOS has one application scene. Persist opening and closing immediately: a scene snapshot
+    // taken during the password-manager switch may still contain a login that was later dismissed.
+    // Only the entry route is stored. Form contents stay in WebKit.
+    #if os(iOS)
+    @AppStorage("orihon.bika.accountRoute") private var bikaAccountRoute: String?
+    #else
+    @State private var bikaAccountRoute: String?
+    #endif
     @State private var appLock: MihonAppLock
 
     public struct ActiveReaderSession: Identifiable {
@@ -157,6 +167,21 @@ public struct MihonRootView: View {
                 isUnfolded = newValue
                 adaptPathsForPosture(unfolded: newValue)
                 syncNavigatorState()
+            }
+        }
+        // Keep the account browser above both layouts, including while iOS switches apps or resizes the window.
+        .allowsHitTesting(bikaAccountRoute == nil)
+        .accessibilityHidden(bikaAccountRoute != nil)
+        .overlay {
+            if let route = bikaAccountRoute {
+                WebsiteSessionSheet(url: route == "login" ? BikaWebsite.loginURL : BikaWebsite.accountURL) {
+                    BikaWebsite.endAccountEditing()
+                    bikaAccountRoute = nil
+                    navigator.bikaAccountRevision += 1
+                }
+                .onAppear { BikaWebsite.beginAccountEditing() }
+                .background(.background, ignoresSafeAreaEdges: .all)
+                .accessibilityAddTraits(.isModal)
             }
         }
         .environment(\.mihonNavigator, navigator)
@@ -342,6 +367,14 @@ public struct MihonRootView: View {
     // MARK: Navigator
 
     private func installNavigatorHandlers() {
+        if bikaAccountRoute != nil && browsePath.isEmpty {
+            select(tab: MihonHomeTab.browse.rawValue)
+            browsePath = [.source(sourceId: BikaWebsite.sourceId, listing: .popular, query: nil)]
+        }
+        navigator.openBikaAccount = { url in
+            BikaWebsite.beginAccountEditing()
+            bikaAccountRoute = url == BikaWebsite.loginURL ? "login" : "profile"
+        }
         navigator.openReaderHandler = { manga, chapter in
             activeReaderSession = ActiveReaderSession(manga: manga, chapter: chapter)
         }

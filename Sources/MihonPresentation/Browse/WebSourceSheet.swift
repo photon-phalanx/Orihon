@@ -54,6 +54,10 @@ struct WebsiteLocation: Identifiable {
 
 struct WebsiteSessionSheet: View {
     let url: URL
+    var onDone: (() -> Void)? = nil
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var recoveryURL: URL?
+    @State private var didRecover = false
     @Environment(\.dismiss) private var dismiss
     @State private var loadState: WebsiteLoadState = .loading
     @State private var attempt = 0
@@ -61,10 +65,10 @@ struct WebsiteSessionSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                SourceWebView(url: url, loadState: $loadState)
+                SourceWebView(url: recoveryURL ?? url, loadState: $loadState)
                     .id(attempt)
                 switch loadState {
-                case .loading:
+                case .loading, .terminated:
                     ProgressView("正在打开源站…")
                         .allowsHitTesting(false)
                 case .failed(let message):
@@ -74,6 +78,7 @@ struct WebsiteSessionSheet: View {
                         Text(message)
                     } actions: {
                         Button("重新打开") {
+                            didRecover = false
                             loadState = .loading
                             attempt += 1
                         }
@@ -83,7 +88,21 @@ struct WebsiteSessionSheet: View {
                 }
             }
             .navigationTitle(url.host ?? "源站")
-            .toolbar { Button("完成") { dismiss() } }
+            .toolbar { Button("完成") { if let onDone { onDone() } else { dismiss() } } }
+            .task(id: scenePhase == .active && loadState.isTerminated) {
+                guard scenePhase == .active, case .terminated(let lastURL) = loadState else { return }
+                guard !didRecover else {
+                    loadState = .failed("网页暂时无法恢复，请重新打开。")
+                    return
+                }
+                didRecover = true
+                recoveryURL = lastURL
+                loadState = .loading
+                attempt += 1
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { didRecover = false }
+            }
         }
         #if os(macOS)
         .frame(minWidth: 420, idealWidth: 560, minHeight: 420, idealHeight: 600)
@@ -92,7 +111,12 @@ struct WebsiteSessionSheet: View {
 }
 
 private enum WebsiteLoadState {
-    case loading, ready, failed(String)
+    case loading, ready, failed(String), terminated(URL)
+
+    var isTerminated: Bool {
+        if case .terminated = self { return true }
+        return false
+    }
 }
 
 @MainActor
@@ -135,7 +159,11 @@ private struct SourceWebView {
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            state = .failed("网页已关闭，请重新打开。")
+            if let url = webView.url, url.scheme == "https", url.host == BikaWebsite.accountURL.host {
+                state = .terminated(url)
+            } else {
+                state = .failed("网页已关闭，请重新打开。")
+            }
         }
     }
 

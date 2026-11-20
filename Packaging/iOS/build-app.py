@@ -37,6 +37,18 @@ def build(build_number, simulator):
     build_args = ["xcrun", "swift", "build", "--package-path", ROOT, "--build-system", "native",
                   "--scratch-path", ROOT / ".build" / sdk, "--configuration", "debug" if simulator else "release",
                   "--sdk", sdk_path, "--triple", triple, "--product", "MihonApp"]
+    if simulator:
+        # iOS simulator entitlements belong in the Mach-O section, not the macOS code signature.
+        # Give SecItem an app-scoped group so native login tokens can survive simulator relaunches.
+        identifier = "SIMULATOR." + plist(PACKAGING / "Info.plist")["CFBundleIdentifier"]
+        entitlements = ROOT / ".build" / sdk / "simulator-entitlements.plist"
+        entitlements.parent.mkdir(parents=True, exist_ok=True)
+        entitlements.write_bytes(plistlib.dumps({
+            "application-identifier": identifier,
+            "keychain-access-groups": [identifier],
+        }))
+        for value in ["-sectcreate", "__TEXT", "__entitlements", str(entitlements)]:
+            build_args += ["-Xlinker", value]
     subprocess.run(build_args, check=True)
     binary = Path(output(*build_args, "--show-bin-path")) / "MihonApp"
     metadata = output("xcrun", "vtool", "-show-build", binary)

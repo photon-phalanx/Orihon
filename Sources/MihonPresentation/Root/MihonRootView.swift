@@ -114,7 +114,7 @@ public struct MihonRootView: View {
     @State private var isUnfolded = false
     // iOS has one application scene. Persist opening and closing immediately: a scene snapshot
     // taken during the password-manager switch may still contain a login that was later dismissed.
-    // Only the entry route is stored. Form contents stay in WebKit.
+    // Only the entry route is stored. Credentials stay in the native form until login completes.
     #if os(iOS)
     @AppStorage("orihon.bika.accountRoute") private var bikaAccountRoute: String?
     #else
@@ -169,12 +169,12 @@ public struct MihonRootView: View {
                 syncNavigatorState()
             }
         }
-        // Keep the account browser above both layouts, including while iOS switches apps or resizes the window.
+        // Keep the native account form above both layouts, including during password-manager switches.
         .allowsHitTesting(bikaAccountRoute == nil)
         .accessibilityHidden(bikaAccountRoute != nil)
         .overlay {
-            if let route = bikaAccountRoute {
-                WebsiteSessionSheet(url: route == "login" ? BikaWebsite.loginURL : BikaWebsite.accountURL) {
+            if bikaAccountRoute != nil {
+                BikaAccountSheet {
                     BikaWebsite.endAccountEditing()
                     bikaAccountRoute = nil
                     navigator.bikaAccountRevision += 1

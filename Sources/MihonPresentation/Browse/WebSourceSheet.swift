@@ -173,7 +173,7 @@ private struct SourceWebView {
         let view = WKWebView()
         view.navigationDelegate = context.coordinator
         view.allowsBackForwardNavigationGestures = true
-        view.load(URLRequest(url: url))
+        BikaAdFilter.loadInitialPage(url, in: view)
         return view
     }
 }

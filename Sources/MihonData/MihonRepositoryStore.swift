@@ -1979,7 +1979,8 @@ public final class MihonRepositoryStore {
     static let pageListLifetime: TimeInterval = 5 * 60
 
     /// Resolves the page list for the reader: offline download → live source → demo renderer.
-    public func pageList(for manga: Manga, chapter: Chapter) async throws -> [Page] {
+    public func pageList(for manga: Manga, chapter: Chapter, openingAt: Int = 0,
+                         onOpeningPage: (@MainActor (Page, Int) -> Void)? = nil) async throws -> [Page] {
         if let cached = pageListCache[chapter.id], Date().timeIntervalSince(cached.fetched) < Self.pageListLifetime {
             return cached.pages
         }
@@ -1992,7 +1993,14 @@ public final class MihonRepositoryStore {
                 Page(index: idx, url: chapter.url, imageUrl: url, chapterTitle: chapter.name, mangaTitle: manga.title)
             }
         } else if let source = catalogueSource(for: manga.source), source.isLive {
-            pages = try await source.getPageList(chapter: SChapter(url: chapter.url, name: chapter.name))
+            let sourceChapter = SChapter(url: chapter.url, name: chapter.name)
+            if let onOpeningPage, let bika = source.liveEngine as? BikaWebsite {
+                pages = try await bika.pageList(chapter: sourceChapter, openingAt: openingAt) { page, total in
+                    if generation == self.pageListGeneration { onOpeningPage(page, total) }
+                }
+            } else {
+                pages = try await source.getPageList(chapter: sourceChapter)
+            }
             // Upstream's "No pages found": a locked episode or an error page, never a chapter to show or download.
             guard !pages.isEmpty else { throw ChapterPagesError.noPages }
         } else if !showsDemoFeatures {

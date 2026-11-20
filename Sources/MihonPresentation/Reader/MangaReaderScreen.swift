@@ -38,7 +38,9 @@ public struct MangaReaderScreen: View {
     @State private var currentChapter: Chapter
     @State private var pages: [Page] = []
     @State private var isLoadingPages = true
+    @State private var openingPreview: (chapterId: Int64, page: Page, total: Int)?
     @State private var website: WebsiteLocation?
+    @State private var showBikaAccount = false
     @State private var loadError: String?
     @State private var currentPage = 0
     @State private var pagerPosition: Int?
@@ -303,6 +305,11 @@ public struct MangaReaderScreen: View {
                 .environment(store)
                 .mihonSheetChrome(colors, detents: [.medium, .large])
         }
+        .sheet(isPresented: $showBikaAccount, onDismiss: { chapterLoadToken += 1 }) {
+            BikaAccountSheet { showBikaAccount = false }
+                .onAppear { BikaWebsite.beginAccountEditing() }
+                .onDisappear { BikaWebsite.endAccountEditing() }
+        }
         .sheet(item: $website, onDismiss: { chapterLoadToken += 1 }) { location in
             WebsiteSessionSheet(url: location.url)
         }
@@ -391,14 +398,22 @@ public struct MangaReaderScreen: View {
     @ViewBuilder
     private func viewer(size: CGSize, spread: Bool, insets: EdgeInsets) -> some View {
         if isLoadingPages && pages.isEmpty {
-            MihonCircularProgress(color: .white.opacity(0.9), trackColor: .white.opacity(0.15))
+            if !spread, let preview = openingPreview, preview.chapterId == currentChapter.id {
+                MangaPageImageView(page: preview.page, mangaTitle: manga.title, chapterTitle: currentChapter.name,
+                    totalPages: preview.total, cropBorders: store.cropBorders, colorFilter: store.colorFilter,
+                    maxPixelSize: pageDecodeSize(in: size, spread: false))
+            } else {
+                MihonCircularProgress(color: .white.opacity(0.9), trackColor: .white.opacity(0.15))
+            }
         } else if let loadError, pages.isEmpty {
             VStack(spacing: 16) {
                 Text(loadError)
                     .font(MihonType.bodyMedium)
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
-                if let url = store.websiteURL(sourceId: manga.source, path: currentChapter.url) {
+                if manga.source == BikaWebsite.sourceId {
+                    Button("登录哔咔账号") { showBikaAccount = true }
+                } else if let url = store.websiteURL(sourceId: manga.source, path: currentChapter.url) {
                     Button("打开源站") { website = WebsiteLocation(url: url) }
                 }
                 Button("重试") { chapterLoadToken += 1 }
@@ -1412,12 +1427,23 @@ public struct MangaReaderScreen: View {
         pagesFetchedAhead = false
         isLoadingPages = true
         loadError = nil
+        openingPreview = nil
         let opensAt = opening
         let chapterId = currentChapter.id
         do {
-            let loaded = try await store.pageList(for: manga, chapter: currentChapter)
+            let saved = store.chaptersByManga[manga.id]?.first { $0.id == chapterId } ?? currentChapter
+            let openingIndex = switch opensAt {
+            case .first: 0
+            case .last: Int.max
+            case .saved: saved.read ? 0 : saved.lastPageRead
+            }
+            let loaded = try await store.pageList(for: manga, chapter: currentChapter, openingAt: openingIndex) { page, total in
+                guard !Task.isCancelled, currentChapter.id == chapterId, pages.isEmpty else { return }
+                openingPreview = (chapterId, page, total)
+            }
             // Another chapter opened meanwhile (its task cancels this one only at the next update).
             guard !Task.isCancelled, currentChapter.id == chapterId else { return }
+            openingPreview = nil
             opening = .saved
             if fetchedAhead, loaded.count == pages.count {
                 // Open already, on the list fetched ahead: a fresher one (past the store's five minutes) only renews
@@ -1451,6 +1477,7 @@ public struct MangaReaderScreen: View {
             )
         } catch {
             guard !Task.isCancelled, currentChapter.id == chapterId else { return }
+            openingPreview = nil
             isLoadingPages = false
             // Shown already: the list fetched ahead, not an error over the pages being read.
             if fetchedAhead, !pages.isEmpty { return }

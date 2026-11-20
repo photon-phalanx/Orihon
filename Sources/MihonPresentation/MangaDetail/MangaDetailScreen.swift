@@ -191,6 +191,11 @@ public struct MangaDetailScreen: View {
         .task(id: manga.id) {
             await store.refreshMangaFromSource(mangaId: manga.id)
         }
+        .onChange(of: navigator.bikaAccountRevision) { _, _ in
+            if manga.source == BikaWebsite.sourceId {
+                Task { await store.refreshMangaFromSource(mangaId: manga.id, force: true) }
+            }
+        }
         .sheet(item: $website, onDismiss: {
             Task { await store.refreshMangaFromSource(mangaId: manga.id, force: true) }
         }) { location in
@@ -288,6 +293,9 @@ public struct MangaDetailScreen: View {
                 .help("筛选")
                 Menu {
                     Button("刷新") { Task { await store.refreshMangaFromSource(mangaId: manga.id, force: true) } }
+                    if manga.source == BikaWebsite.sourceId {
+                        Button("哔咔账号") { navigator.openBikaAccount(BikaWebsite.accountURL) }
+                    }
                     Button("设置分类") { showCategories = true }
                     Button("编辑注释") { showNotes = true }
                     if let url = store.websiteURL(sourceId: manga.source, path: manga.url) {

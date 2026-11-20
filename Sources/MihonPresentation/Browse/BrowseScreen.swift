@@ -800,7 +800,7 @@ public struct BrowseSourceScreen: View {
             MihonEmptyScreen(message: listingError.localizedDescription, actions: [
                 (title: "重试", systemImage: "arrow.clockwise", action: { reload() })
             ] + ((listingError as? BikaReadError) == .login ? [
-                (title: "打开源站登录", systemImage: "person.crop.circle", action: { navigator.openBikaAccount(BikaWebsite.loginURL) })
+                (title: "登录哔咔账号", systemImage: "person.crop.circle", action: { navigator.openBikaAccount(BikaWebsite.loginURL) })
             ] : []) + (KomgaLiveEngine.handles(sourceId: sourceId) ? [
                 (title: "设置", systemImage: "gearshape", action: { showsKomgaSettings = true })
             ] : []))
